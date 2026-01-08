@@ -1,0 +1,11 @@
+# Токен Telegram бота (получить у @BotFather)
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+
+# ID Google таблицы (из URL таблицы)
+GOOGLE_SHEET_ID=your_google_sheet_id_here
+
+# Путь к файлу с учетными данными Google Service Account
+GOOGLE_CREDENTIALS_PATH=credentials.json
+
+# Ссылка на бланки для заполнения
+FORMS_LINK=https://example.com/forms
