@@ -1,83 +1,94 @@
 import logging
 from datetime import datetime, timedelta
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.date import DateTrigger
 import pytz
 
 logger = logging.getLogger(__name__)
 
 
 class ReminderScheduler:
-    """Класс для управления напоминаниями"""
+    """Класс для управления напоминаниями через периодическую проверку Google Sheets"""
     
     def __init__(self):
-        self.scheduler = AsyncIOScheduler()
-        self.scheduler.start()
         self.timezone = pytz.timezone("Europe/Moscow")  # Московское время
+        self.sheets = None
+        self.bot = None
     
-    def schedule_reminders(self, user_id: int, exam_datetime: datetime, bot):
-        """Настройка напоминаний для пользователя"""
-        # Убеждаемся, что дата в правильном часовом поясе
-        if exam_datetime.tzinfo is None:
-            exam_datetime = self.timezone.localize(exam_datetime)
+    def initialize(self, sheets, bot):
+        """Инициализация с Google Sheets и ботом"""
+        self.sheets = sheets
+        self.bot = bot
+        logger.info("ReminderScheduler инициализирован")
+    
+    async def check_and_send_reminders(self, context=None):
+        """Проверка и отправка напоминаний (вызывается каждую минуту)"""
+        if not self.sheets:
+            logger.warning("ReminderScheduler не инициализирован (нет sheets)")
+            return
         
-        # Напоминание за час до экзамена
-        reminder_1h = exam_datetime - timedelta(hours=1)
-        if reminder_1h > datetime.now(self.timezone):
-            self.scheduler.add_job(
-                self.send_reminder,
-                DateTrigger(run_date=reminder_1h),
-                args=[bot, user_id, "Напоминание: экзамен начнется через час"],
-                id=f"reminder_1h_{user_id}_{exam_datetime.timestamp()}",
-                replace_existing=True
-            )
-            logger.info(f"Напоминание за час настроено для пользователя {user_id} на {reminder_1h}")
+        # Используем bot из context, если передан, иначе из self.bot
+        bot = context.bot if context and hasattr(context, 'bot') else self.bot
+        if not bot:
+            logger.warning("ReminderScheduler не инициализирован (нет bot)")
+            return
         
-        # Напоминание за 15 минут до экзамена
-        reminder_15m = exam_datetime - timedelta(minutes=15)
-        if reminder_15m > datetime.now(self.timezone):
-            self.scheduler.add_job(
-                self.send_reminder,
-                DateTrigger(run_date=reminder_15m),
-                args=[bot, user_id, "Напоминание: экзамен начнется через 15 минут"],
-                id=f"reminder_15m_{user_id}_{exam_datetime.timestamp()}",
-                replace_existing=True
-            )
-            logger.info(f"Напоминание за 15 минут настроено для пользователя {user_id} на {reminder_15m}")
-    
-    async def send_reminder(self, bot, user_id: int, message: str):
-        """Отправка напоминания пользователю"""
         try:
-            await bot.send_message(chat_id=user_id, text=message)
-            logger.info(f"Напоминание отправлено пользователю {user_id}")
-        except Exception as e:
-            logger.error(f"Ошибка при отправке напоминания пользователю {user_id}: {e}")
-    
-    async def load_reminders_from_sheets(self, sheets, bot):
-        """Загрузка напоминаний из Google Sheets при запуске бота"""
-        try:
-            upcoming_exams = sheets.get_upcoming_exams()
-            for exam in upcoming_exams:
-                telegram_id = exam.get("telegram_id")
-                exam_datetime_str = exam.get("exam_datetime")
+            # Получаем все экзамены из таблицы
+            exams = self.sheets.get_all_exams_for_reminders()
+            
+            now = datetime.now()
+            sent_count = 0
+            
+            for exam in exams:
+                exam_datetime = exam["exam_datetime"]
+                telegram_id = exam.get("telegram_id", "")
                 
-                if not telegram_id or not exam_datetime_str:
+                if not telegram_id:
                     continue
                 
                 try:
-                    if isinstance(exam_datetime_str, str):
-                        exam_datetime = datetime.fromisoformat(exam_datetime_str)
-                    else:
-                        exam_datetime = exam_datetime_str
-                    
-                    if exam_datetime.tzinfo is None:
-                        exam_datetime = self.timezone.localize(exam_datetime)
-                    
-                    self.schedule_reminders(int(telegram_id), exam_datetime, bot)
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Ошибка при загрузке напоминания: {e}")
+                    telegram_id = int(telegram_id)
+                except (ValueError, TypeError):
+                    logger.warning(f"Некорректный Telegram ID: {telegram_id}")
                     continue
+                
+                # Проверяем напоминание за час
+                reminder_1h_time = exam_datetime - timedelta(hours=1)
+                if not exam["reminder_1h_sent"]:
+                    # Проверяем, нужно ли отправить сейчас (с допуском в 1 минуту)
+                    time_diff = (reminder_1h_time - now).total_seconds()
+                    if 0 <= time_diff <= 60:  # В пределах 1 минуты
+                        try:
+                            await bot.send_message(
+                                chat_id=telegram_id,
+                                text="Напоминание: экзамен начнется через час"
+                            )
+                            # Отмечаем как отправленное в таблице
+                            self.sheets.mark_reminder_sent(exam["row_number"], "1h")
+                            sent_count += 1
+                            logger.info(f"Напоминание за час отправлено пользователю {telegram_id} ({exam.get('full_name', '')})")
+                        except Exception as e:
+                            logger.error(f"Ошибка при отправке напоминания за час пользователю {telegram_id}: {e}")
+                
+                # Проверяем напоминание за 15 минут
+                reminder_15m_time = exam_datetime - timedelta(minutes=15)
+                if not exam["reminder_15m_sent"]:
+                    # Проверяем, нужно ли отправить сейчас (с допуском в 1 минуту)
+                    time_diff = (reminder_15m_time - now).total_seconds()
+                    if 0 <= time_diff <= 60:  # В пределах 1 минуты
+                        try:
+                            await bot.send_message(
+                                chat_id=telegram_id,
+                                text="Напоминание: экзамен начнется через 15 минут"
+                            )
+                            # Отмечаем как отправленное в таблице
+                            self.sheets.mark_reminder_sent(exam["row_number"], "15m")
+                            sent_count += 1
+                            logger.info(f"Напоминание за 15 минут отправлено пользователю {telegram_id} ({exam.get('full_name', '')})")
+                        except Exception as e:
+                            logger.error(f"Ошибка при отправке напоминания за 15 минут пользователю {telegram_id}: {e}")
             
-            logger.info(f"Загружено {len(upcoming_exams)} напоминаний из Google Sheets")
+            if sent_count > 0:
+                logger.info(f"Отправлено {sent_count} напоминаний")
+                
         except Exception as e:
-            logger.error(f"Ошибка при загрузке напоминаний из Google Sheets: {e}")
+            logger.error(f"Ошибка при проверке напоминаний: {e}", exc_info=True)
