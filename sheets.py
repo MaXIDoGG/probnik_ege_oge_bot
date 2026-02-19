@@ -127,6 +127,7 @@ class GoogleSheets:
                         "telegram_id": record.get("Telegram ID", ""),
                         "exam_datetime": exam_datetime,
                         "full_name": record.get("Имя и фамилия", ""),
+                        "day_name": record.get("День", ""),  # Суббота или Воскресенье
                         "reminder_1h_sent": reminder_1h_sent in ("да", "yes", "1", "true", "✓"),
                         "reminder_15m_sent": reminder_15m_sent in ("да", "yes", "1", "true", "✓")
                     })
@@ -147,6 +148,7 @@ class GoogleSheets:
                             "telegram_id": record.get("Telegram ID", ""),
                             "exam_datetime": exam_datetime,
                             "full_name": record.get("Имя и фамилия", ""),
+                            "day_name": record.get("День", ""),
                             "reminder_1h_sent": reminder_1h_sent in ("да", "yes", "1", "true", "✓"),
                             "reminder_15m_sent": reminder_15m_sent in ("да", "yes", "1", "true", "✓")
                         })

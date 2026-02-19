@@ -52,6 +52,12 @@ class ReminderScheduler:
                     continue
                 
                 # Проверяем напоминание за час
+                day_name = exam.get("day_name", "").strip()
+                zoom_saturday = "https://us06web.zoom.us/j/9709286191"
+                zoom_sunday = "https://us06web.zoom.us/j/5621545595?pwd=EEaV6rb8Dr8UgaaL9AF4wbarlhraNV.1"
+                zoom_link = zoom_sunday if "воскресенье" in day_name.lower() else zoom_saturday
+                msg_1h = f"У тебя экзамен через час, ещё раз держи ссылку, на всякий случай {zoom_link}\nУдачи🍀"
+                
                 reminder_1h_time = exam_datetime - timedelta(hours=1)
                 if not exam["reminder_1h_sent"]:
                     # Проверяем, нужно ли отправить сейчас (с допуском в 1 минуту)
@@ -60,7 +66,7 @@ class ReminderScheduler:
                         try:
                             await bot.send_message(
                                 chat_id=telegram_id,
-                                text="Напоминание: экзамен начнется через час"
+                                text=msg_1h
                             )
                             # Отмечаем как отправленное в таблице
                             self.sheets.mark_reminder_sent(exam["row_number"], "1h")
@@ -78,7 +84,7 @@ class ReminderScheduler:
                         try:
                             await bot.send_message(
                                 chat_id=telegram_id,
-                                text="Напоминание: экзамен начнется через 15 минут"
+                                text="Экзамен через 15 минут, подготовь всё что нужно и заходи🌚"
                             )
                             # Отмечаем как отправленное в таблице
                             self.sheets.mark_reminder_sent(exam["row_number"], "15m")
