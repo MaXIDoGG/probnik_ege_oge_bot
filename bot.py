@@ -1,7 +1,6 @@
 import logging
 import os
 from datetime import datetime, timedelta
-import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -199,11 +198,10 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     exam_date = today + timedelta(days=days_ahead)
     exam_time = user_data[user_id]["time"]
     
-    # Создаем полную дату и время экзамена
-    timezone = pytz.timezone("Europe/Moscow")
+    # Создаем полную дату и время экзамена в удобном формате для Google Sheets
+    # Формат: DD.MM.YYYY HH:MM (например, 21.12.2024 15:00)
     exam_datetime = datetime.combine(exam_date.date(), datetime.strptime(exam_time, "%H:%M").time())
-    exam_datetime = timezone.localize(exam_datetime)
-    user_data[user_id]["exam_datetime"] = exam_datetime.isoformat()
+    user_data[user_id]["exam_datetime"] = exam_datetime.strftime("%d.%m.%Y %H:%M")
     
     # Сохраняем в Google Sheets
     try:
@@ -215,13 +213,6 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже."
         )
         return ConversationHandler.END
-    
-    # Настраиваем напоминания
-    try:
-        scheduler.schedule_reminders(user_id, exam_datetime, context.bot)
-        logger.info(f"Напоминания для пользователя {user_id} настроены")
-    except Exception as e:
-        logger.error(f"Ошибка при настройке напоминаний: {e}")
     
     # Отправляем ссылку на бланки
     forms_link = os.getenv("FORMS_LINK", "https://example.com/forms")
@@ -284,13 +275,27 @@ def main():
     except Exception as e:
         logger.error(f"Ошибка инициализации Google Sheets: {e}")
     
-    # Функция для загрузки напоминаний после инициализации бота
+    # Функция для инициализации напоминаний после запуска бота
     async def post_init(app: Application) -> None:
-        """Загрузка напоминаний после инициализации бота"""
+        """Инициализация scheduler после запуска бота"""
         try:
-            await scheduler.load_reminders_from_sheets(sheets, app.bot)
+            scheduler.initialize(sheets, app.bot)
+            # Настраиваем периодическую проверку напоминаний каждую минуту
+            job_queue = app.job_queue
+            if job_queue:
+                # Создаем обертку-функцию для job_queue
+                async def check_reminders_callback(context: ContextTypes.DEFAULT_TYPE):
+                    await scheduler.check_and_send_reminders(context)
+                
+                job_queue.run_repeating(
+                    check_reminders_callback,
+                    interval=60,  # Каждую минуту
+                    first=10,  # Начинаем через 10 секунд после запуска
+                    name="check_reminders"
+                )
+                logger.info("Периодическая проверка напоминаний настроена (каждую минуту)")
         except Exception as e:
-            logger.error(f"Ошибка при загрузке напоминаний: {e}")
+            logger.error(f"Ошибка при инициализации напоминаний: {e}", exc_info=True)
     
     application.post_init = post_init
     
