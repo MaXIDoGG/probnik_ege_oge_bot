@@ -1,0 +1,15 @@
+[Unit]
+Description=EGE/ОГЭ Math Exam Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/EGE_BOT
+Environment=PATH=/root/EGE_BOT/venv/bin
+ExecStart=/root/EGE_BOT/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
