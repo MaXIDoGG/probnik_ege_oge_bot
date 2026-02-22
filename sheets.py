@@ -14,6 +14,7 @@ class GoogleSheets:
         self.client = None
         self.spreadsheet = None
         self.worksheet = None
+        self.schedule_worksheet = None
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID")
         self.credentials_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json")
     
@@ -49,7 +50,7 @@ class GoogleSheets:
                 self.worksheet = self.spreadsheet.add_worksheet(
                     title="Записи",
                     rows=1000,
-                    cols=10
+                    cols=11
                 )
                 # Добавляем заголовки
                 headers = [
@@ -66,6 +67,30 @@ class GoogleSheets:
                     "Напоминание за 15 минут отправлено"
                 ]
                 self.worksheet.append_row(headers)
+            
+            # Получаем или создаём лист "Даты экзаменов" с расписанием
+            try:
+                self.schedule_worksheet = self.spreadsheet.worksheet("Даты экзаменов")
+                logger.info("Лист 'Даты экзаменов' найден")
+            except gspread.exceptions.WorksheetNotFound:
+                self.schedule_worksheet = self.spreadsheet.add_worksheet(
+                    title="Даты экзаменов",
+                    rows=100,
+                    cols=5
+                )
+                # Заголовки: Дата, Время, Zoom, Контакт
+                headers = ["Дата", "Время", "Zoom", "Контакт"]
+                self.schedule_worksheet.append_row(headers)
+                # Пример данных для заполнения (суббота 28.02, воскресенье 01.03)
+                example_rows = [
+                    ["28.02.2026", "11:00", "https://us06web.zoom.us/j/9709286191", "@vasilina45"],
+                    ["28.02.2026", "15:00", "https://us06web.zoom.us/j/9709286191", "@vasilina45"],
+                    ["01.03.2026", "10:00", "https://us06web.zoom.us/j/5621545595?pwd=EEaV6rb8Dr8UgaaL9AF4wbarlhraNV.1", "@dkvnastya"],
+                    ["01.03.2026", "14:00", "https://us06web.zoom.us/j/5621545595?pwd=EEaV6rb8Dr8UgaaL9AF4wbarlhraNV.1", "@dkvnastya"],
+                ]
+                for row in example_rows:
+                    self.schedule_worksheet.append_row(row)
+                logger.info("Создан лист 'Даты экзаменов' с примером расписания")
             
             logger.info("Google Sheets успешно инициализирован")
             
@@ -96,6 +121,60 @@ class GoogleSheets:
         # Добавляем строку в таблицу
         self.worksheet.append_row(row)
         logger.info(f"Данные сохранены в Google Sheets: {user_data.get('full_name')}")
+    
+    def get_exam_slots(self):
+        """
+        Получение списка доступных слотов экзаменов из листа "Даты экзаменов".
+        Возвращает список словарей: [{date, time, datetime_str, zoom, contact, day_name}, ...]
+        Только слоты в будущем.
+        """
+        if not self.schedule_worksheet:
+            raise RuntimeError("Google Sheets не инициализирован")
+        
+        records = self.schedule_worksheet.get_all_records()
+        slots = []
+        now = datetime.now()
+        months_ru = ["", "января", "февраля", "марта", "апреля", "мая", "июня",
+                     "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+        days_ru = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+        
+        for idx, record in enumerate(records):
+            date_str = str(record.get("Дата", "")).strip()
+            time_str = str(record.get("Время", "")).strip()
+            zoom = str(record.get("Zoom", "")).strip()
+            contact = str(record.get("Контакт", "")).strip()
+            
+            if not date_str or not time_str:
+                continue
+            
+            try:
+                exam_date = datetime.strptime(date_str, "%d.%m.%Y")
+                exam_time = datetime.strptime(time_str, "%H:%M").time()
+                exam_datetime = datetime.combine(exam_date.date(), exam_time)
+                
+                if exam_datetime < now:
+                    continue
+                
+                day_name = days_ru[exam_date.weekday()]
+                display_date = f"{day_name}, {exam_date.day} {months_ru[exam_date.month]} {time_str}"
+                datetime_str = exam_datetime.strftime("%d.%m.%Y %H:%M")
+                
+                slots.append({
+                    "index": idx,
+                    "date": date_str,
+                    "time": time_str,
+                    "datetime_str": datetime_str,
+                    "exam_datetime": exam_datetime,
+                    "zoom": zoom or "https://us06web.zoom.us/j/9709286191",
+                    "contact": contact or "@vasilina45",
+                    "day_name": day_name,
+                    "display": display_date
+                })
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Ошибка парсинга слота: {date_str} {time_str}, {e}")
+                continue
+        
+        return slots
     
     def get_all_exams_for_reminders(self):
         """Получение всех экзаменов для проверки напоминаний"""

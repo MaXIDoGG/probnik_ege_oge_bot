@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -26,7 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Состояния диалога
-EXAM_TYPE, DAY, TIME, TEACHER, NAME = range(5)
+EXAM_TYPE, EXAM_SLOT, TEACHER, NAME = range(4)
 
 # Инициализация Google Sheets
 sheets = GoogleSheets()
@@ -73,60 +73,59 @@ async def exam_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     user_data[user_id]["exam_type"] = exam_types.get(exam_type, exam_type)
     
+    # Получаем доступные слоты из таблицы
+    try:
+        slots = sheets.get_exam_slots()
+    except Exception as e:
+        logger.error(f"Ошибка получения слотов: {e}")
+        await query.edit_message_text(
+            "К сожалению, не удалось загрузить расписание. Попробуйте позже."
+        )
+        return ConversationHandler.END
+    
+    if not slots:
+        await query.edit_message_text(
+            "На данный момент нет доступных дат для записи. Обратитесь к организаторам."
+        )
+        return ConversationHandler.END
+    
     keyboard = [
-        [InlineKeyboardButton("Суббота", callback_data="day_saturday")],
-        [InlineKeyboardButton("Воскресенье", callback_data="day_sunday")]
+        [InlineKeyboardButton(slot["display"], callback_data=f"slot_{slot['index']}")]
+        for slot in slots
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    user_data[user_id]["_slots"] = slots
+    
     await query.edit_message_text(
-        "Выбери день:",
+        "Выбери дату и время экзамена:",
         reply_markup=reply_markup
     )
     
-    return DAY
+    return EXAM_SLOT
 
 
-async def day_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Обработка выбора дня"""
+async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обработка выбора слота (дата и время)"""
     query = update.callback_query
     await query.answer()
     
     user_id = query.from_user.id
-    day = query.data.replace("day_", "")
+    slot_index = int(query.data.replace("slot_", ""))
     
-    user_data[user_id]["day"] = day
+    slots = user_data[user_id].get("_slots", [])
+    slot = next((s for s in slots if s["index"] == slot_index), None)
     
-    # Определяем время в зависимости от дня
-    if day == "saturday":
-        times = ["11:00", "15:00"]
-        day_name = "Суббота"
-    else:  # sunday
-        times = ["10:00", "14:00"]
-        day_name = "Воскресенье"
+    if not slot:
+        await query.edit_message_text("Выбранный слот недоступен. Начните заново /start")
+        return ConversationHandler.END
     
-    user_data[user_id]["day_name"] = day_name
-    
-    keyboard = [[InlineKeyboardButton(time, callback_data=f"time_{time}")] for time in times]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        "Выбери время:",
-        reply_markup=reply_markup
-    )
-    
-    return TIME
-
-
-async def time_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Обработка выбора времени"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = query.from_user.id
-    time = query.data.replace("time_", "")
-    
-    user_data[user_id]["time"] = time
+    user_data[user_id]["slot"] = slot
+    user_data[user_id]["day_name"] = slot["day_name"]
+    user_data[user_id]["time"] = slot["time"]
+    user_data[user_id]["exam_datetime"] = slot["datetime_str"]
+    user_data[user_id]["zoom"] = slot["zoom"]
+    user_data[user_id]["contact"] = slot["contact"]
     
     keyboard = [
         [InlineKeyboardButton("Анастасия", callback_data="teacher_anastasia")],
@@ -180,28 +179,7 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_data[user_id]["telegram_id"] = user_id
     user_data[user_id]["telegram_username"] = update.effective_user.username or ""
     
-    # Вычисляем дату экзамена
-    today = datetime.now()
-    day_name = user_data[user_id]["day_name"]
-    
-    # Находим ближайшую субботу или воскресенье
-    days_ahead = 0
-    if day_name == "Суббота":
-        days_ahead = (5 - today.weekday()) % 7
-        if days_ahead == 0 and today.weekday() != 5:
-            days_ahead = 7
-    else:  # Воскресенье
-        days_ahead = (6 - today.weekday()) % 7
-        if days_ahead == 0 and today.weekday() != 6:
-            days_ahead = 7
-    
-    exam_date = today + timedelta(days=days_ahead)
-    exam_time = user_data[user_id]["time"]
-    
-    # Создаем полную дату и время экзамена в удобном формате для Google Sheets
-    # Формат: DD.MM.YYYY HH:MM (например, 21.12.2024 15:00)
-    exam_datetime = datetime.combine(exam_date.date(), datetime.strptime(exam_time, "%H:%M").time())
-    user_data[user_id]["exam_datetime"] = exam_datetime.strftime("%d.%m.%Y %H:%M")
+    # Дата и время берутся из выбранного слота (уже сохранены в user_data)
     
     # Сохраняем в Google Sheets
     try:
@@ -215,27 +193,20 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
     
     # Формируем сообщение после регистрации
-    months_ru = ["", "января", "февраля", "марта", "апреля", "мая", "июня", 
-                 "июля", "августа", "сентября", "октября", "ноября", "декабря"]
-    date_str = f"{day_name}, {exam_date.day} {months_ru[exam_date.month]}"
-    forms_link = "https://drive.google.com/file/d/1UcgVmYd2pulJ6tAqFGzY3xzY7n6UiJ2r/view?usp=drivesdk"
+    slot = user_data[user_id].get("slot", {})
+    date_str = slot.get("display", user_data[user_id].get("exam_datetime", ""))
+    zoom_link = user_data[user_id].get("zoom", "https://us06web.zoom.us/j/9709286191")
+    contact = user_data[user_id].get("contact", "@vasilina45")
+    day_name = user_data[user_id].get("day_name", "")
     
-    if day_name == "Суббота":
-        zoom_link = "https://us06web.zoom.us/j/9709286191"
-        support_msg = (
-            "Твоя поддержка на экзамене: \n"
-            "Во время пробника в субботу с тобой будет находится Василина. "
-            "Если возникнут любые технические сложности или вопросы по организации, сразу пиши в тг:\n"
-            "📱 @vasilina45 ."
-        )
-    else:  # Воскресенье
-        zoom_link = "https://us06web.zoom.us/j/5621545595?pwd=EEaV6rb8Dr8UgaaL9AF4wbarlhraNV.1"
-        support_msg = (
-            "Твоя поддержка на экзамене: \n"
-            "Во время пробника в воскресенье с тобой будет находится Анастасия. "
-            "Если возникнут любые технические сложности или вопросы по организации, сразу пиши в тг:\n"
-            "📱 @dkvnastya ."
-        )
+    forms_link = "https://drive.google.com/file/d/1UcgVmYd2pulJ6tAqFGzY3xzY7n6UiJ2r/view?usp=drivesdk"
+    day_in_text = "в субботу" if "суббот" in day_name.lower() else "в воскресенье"
+    support_msg = (
+        "Твоя поддержка на экзамене: \n"
+        f"Во время пробника {day_in_text} с тобой будет находиться дежурный. "
+        "Если возникнут любые технические сложности или вопросы по организации, сразу пиши в тг:\n"
+        f"📱 {contact} ."
+    )
     
     registration_message = (
         "ПРОБНЫЙ ЭКЗАМЕН\n\n"
@@ -284,8 +255,7 @@ def main():
         entry_points=[CommandHandler("start", start)],
         states={
             EXAM_TYPE: [CallbackQueryHandler(exam_type_callback, pattern="^exam_")],
-            DAY: [CallbackQueryHandler(day_callback, pattern="^day_")],
-            TIME: [CallbackQueryHandler(time_callback, pattern="^time_")],
+            EXAM_SLOT: [CallbackQueryHandler(slot_callback, pattern="^slot_")],
             TEACHER: [CallbackQueryHandler(teacher_callback, pattern="^teacher_")],
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_input)],
         },
