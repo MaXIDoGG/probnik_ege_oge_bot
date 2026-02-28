@@ -9,7 +9,7 @@ class ReminderScheduler:
     """Класс для управления напоминаниями через периодическую проверку Google Sheets"""
     
     def __init__(self):
-        self.timezone = pytz.timezone("Europe/Moscow")  # Московское время
+        self.timezone = pytz.timezone("Asia/Novosibirsk")  # Время в таблице — новосибирское
         self.sheets = None
         self.bot = None
     
@@ -35,7 +35,8 @@ class ReminderScheduler:
             # Получаем все экзамены из таблицы
             exams = self.sheets.get_all_exams_for_reminders()
             
-            now = datetime.now()
+            # Текущее время в часовом поясе экзаменов (НСК), не зависит от сервера
+            now = datetime.now(pytz.UTC).astimezone(self.timezone)
             sent_count = 0
             
             for exam in exams:

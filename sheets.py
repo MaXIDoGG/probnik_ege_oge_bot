@@ -3,6 +3,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 import logging
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,8 @@ class GoogleSheets:
         self.schedule_worksheet = None
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID")
         self.credentials_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json")
+        # Часовой пояс, в котором указано время в таблице (НСК)
+        self.timezone = pytz.timezone("Asia/Novosibirsk")
     
     def initialize(self):
         """Инициализация подключения к Google Sheets"""
@@ -103,9 +106,10 @@ class GoogleSheets:
         if not self.worksheet:
             raise RuntimeError("Google Sheets не инициализирован")
         
-        # Подготавливаем данные для записи
+        # Подготавливаем данные для записи (дата записи — в том же часовом поясе, что и экзамены)
+        now_nsk = datetime.now(pytz.UTC).astimezone(self.timezone)
         row = [
-            datetime.now().strftime("%d.%m.%Y %H:%M:%S"),  # Дата записи в удобном формате
+            now_nsk.strftime("%d.%m.%Y %H:%M:%S"),  # Дата записи
             user_data.get("telegram_id", ""),
             user_data.get("telegram_username", ""),
             user_data.get("full_name", ""),
@@ -133,7 +137,7 @@ class GoogleSheets:
         
         records = self.schedule_worksheet.get_all_records()
         slots = []
-        now = datetime.now()
+        now = datetime.now(pytz.UTC).astimezone(self.timezone)
         months_ru = ["", "января", "февраля", "марта", "апреля", "мая", "июня",
                      "июля", "августа", "сентября", "октября", "ноября", "декабря"]
         days_ru = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
@@ -150,14 +154,15 @@ class GoogleSheets:
             try:
                 exam_date = datetime.strptime(date_str, "%d.%m.%Y")
                 exam_time = datetime.strptime(time_str, "%H:%M").time()
-                exam_datetime = datetime.combine(exam_date.date(), exam_time)
+                exam_datetime_naive = datetime.combine(exam_date.date(), exam_time)
+                exam_datetime = self.timezone.localize(exam_datetime_naive)
                 
                 if exam_datetime < now:
                     continue
                 
                 day_name = days_ru[exam_date.weekday()]
                 display_date = f"{day_name}, {exam_date.day} {months_ru[exam_date.month]} {time_str}"
-                datetime_str = exam_datetime.strftime("%d.%m.%Y %H:%M")
+                datetime_str = exam_datetime_naive.strftime("%d.%m.%Y %H:%M")
                 
                 slots.append({
                     "index": idx,
@@ -184,8 +189,7 @@ class GoogleSheets:
         # Получаем все записи
         records = self.worksheet.get_all_records()
         exams = []
-        
-        now = datetime.now()
+        now = datetime.now(pytz.UTC).astimezone(self.timezone)
         
         for idx, record in enumerate(records, start=2):  # Начинаем с 2, так как строка 1 - заголовки
             exam_datetime_str = record.get("Дата и время экзамена", "")
@@ -193,8 +197,9 @@ class GoogleSheets:
                 continue
             
             try:
-                # Парсим формат DD.MM.YYYY HH:MM
-                exam_datetime = datetime.strptime(exam_datetime_str, "%d.%m.%Y %H:%M")
+                # Парсим формат DD.MM.YYYY HH:MM (время в таблице — новосибирское)
+                exam_datetime_naive = datetime.strptime(exam_datetime_str, "%d.%m.%Y %H:%M")
+                exam_datetime = self.timezone.localize(exam_datetime_naive)
                 
                 # Проверяем, что экзамен еще не прошел (с небольшим запасом в 15 минут после окончания)
                 if exam_datetime >= now - timedelta(minutes=15):
@@ -213,10 +218,11 @@ class GoogleSheets:
             except ValueError as e:
                 # Пробуем альтернативные форматы
                 try:
-                    # Формат ISO
                     exam_datetime = datetime.fromisoformat(exam_datetime_str.replace("Z", "+00:00"))
                     if exam_datetime.tzinfo:
-                        exam_datetime = exam_datetime.replace(tzinfo=None)
+                        exam_datetime = exam_datetime.astimezone(self.timezone)
+                    else:
+                        exam_datetime = self.timezone.localize(exam_datetime)
                     
                     if exam_datetime >= now - timedelta(minutes=15):
                         reminder_1h_sent = record.get("Напоминание за час отправлено", "Нет").strip().lower()
