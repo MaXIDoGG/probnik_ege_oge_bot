@@ -291,6 +291,11 @@ def main():
                     name="check_reminders"
                 )
                 logger.info("Периодическая проверка напоминаний настроена (каждую минуту)")
+            else:
+                logger.error(
+                    "JobQueue недоступен — напоминания не будут отправляться. "
+                    "Установите зависимости: pip install \"python-telegram-bot[job-queue]\""
+                )
         except Exception as e:
             logger.error(f"Ошибка при инициализации напоминаний: {e}", exc_info=True)
     
