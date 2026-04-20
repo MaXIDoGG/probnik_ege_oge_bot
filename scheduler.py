@@ -2,6 +2,8 @@ import logging
 from datetime import datetime, timedelta
 import pytz
 
+from messages import TEXT_REMINDER_15M, reminder_1h_text, zoom_link_for_day_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,10 +56,8 @@ class ReminderScheduler:
                 
                 # Проверяем напоминание за час
                 day_name = exam.get("day_name", "").strip()
-                zoom_saturday = "https://us06web.zoom.us/j/9709286191"
-                zoom_sunday = "https://us06web.zoom.us/j/5621545595?pwd=EEaV6rb8Dr8UgaaL9AF4wbarlhraNV.1"
-                zoom_link = zoom_sunday if "воскресенье" in day_name.lower() else zoom_saturday
-                msg_1h = f"У тебя экзамен через час, ещё раз держи ссылку, на всякий случай {zoom_link}\nУдачи🍀"
+                zoom_link = zoom_link_for_day_name(day_name)
+                msg_1h = reminder_1h_text(zoom_link)
                 
                 reminder_1h_time = exam_datetime - timedelta(hours=1)
                 if not exam["reminder_1h_sent"]:
@@ -85,7 +85,7 @@ class ReminderScheduler:
                         try:
                             await bot.send_message(
                                 chat_id=telegram_id,
-                                text="Экзамен через 15 минут, подготовь всё что нужно и заходи🌚"
+                                text=TEXT_REMINDER_15M
                             )
                             # Отмечаем как отправленное в таблице
                             self.sheets.mark_reminder_sent(exam["row_number"], "15m")

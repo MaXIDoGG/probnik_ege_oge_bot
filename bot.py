@@ -14,6 +14,19 @@ from telegram.ext import (
 from dotenv import load_dotenv
 from sheets import GoogleSheets
 from scheduler import ReminderScheduler
+from messages import (
+    TEXT_CANCELLED,
+    TEXT_CHOOSE_EXAM_TYPE,
+    TEXT_CHOOSE_SLOT,
+    TEXT_CHOOSE_TEACHER,
+    TEXT_ENTER_FULL_NAME,
+    TEXT_INVALID_FULL_NAME,
+    TEXT_NO_SLOTS,
+    TEXT_SAVE_ERROR,
+    TEXT_SCHEDULE_LOAD_ERROR,
+    TEXT_SLOT_UNAVAILABLE,
+    registration_message_text,
+)
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -49,7 +62,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "Выберите тип экзамена:",
+        TEXT_CHOOSE_EXAM_TYPE,
         reply_markup=reply_markup
     )
     
@@ -79,13 +92,13 @@ async def exam_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.error(f"Ошибка получения слотов: {e}")
         await query.edit_message_text(
-            "К сожалению, не удалось загрузить расписание. Попробуйте позже."
+            TEXT_SCHEDULE_LOAD_ERROR
         )
         return ConversationHandler.END
     
     if not slots:
         await query.edit_message_text(
-            "На данный момент нет доступных дат для записи. Обратитесь к организаторам."
+            TEXT_NO_SLOTS
         )
         return ConversationHandler.END
     
@@ -98,7 +111,7 @@ async def exam_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_data[user_id]["_slots"] = slots
     
     await query.edit_message_text(
-        "Выбери дату и время экзамена:",
+        TEXT_CHOOSE_SLOT,
         reply_markup=reply_markup
     )
     
@@ -117,7 +130,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     slot = next((s for s in slots if s["index"] == slot_index), None)
     
     if not slot:
-        await query.edit_message_text("Выбранный слот недоступен. Начните заново /start")
+        await query.edit_message_text(TEXT_SLOT_UNAVAILABLE)
         return ConversationHandler.END
     
     user_data[user_id]["slot"] = slot
@@ -134,7 +147,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "Выбери преподавателя:",
+        TEXT_CHOOSE_TEACHER,
         reply_markup=reply_markup
     )
     
@@ -158,7 +171,7 @@ async def teacher_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_data[user_id]["teacher"] = teachers.get(teacher, teacher)
     
     await query.edit_message_text(
-        "Введи своё имя и фамилию:"
+        TEXT_ENTER_FULL_NAME
     )
     
     return NAME
@@ -171,7 +184,7 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     if not full_name or len(full_name) < 3:
         await update.message.reply_text(
-            "Пожалуйста, введите корректное имя и фамилию (минимум 3 символа):"
+            TEXT_INVALID_FULL_NAME
         )
         return NAME
     
@@ -188,7 +201,7 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     except Exception as e:
         logger.error(f"Ошибка при сохранении в Google Sheets: {e}")
         await update.message.reply_text(
-            "Произошла ошибка при сохранении данных. Пожалуйста, попробуйте позже."
+            TEXT_SAVE_ERROR
         )
         return ConversationHandler.END
     
@@ -198,29 +211,12 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     zoom_link = user_data[user_id].get("zoom", "https://us06web.zoom.us/j/9709286191")
     contact = user_data[user_id].get("contact", "@vasilina45")
     day_name = user_data[user_id].get("day_name", "")
-    
-    forms_link = "https://drive.google.com/file/d/1UcgVmYd2pulJ6tAqFGzY3xzY7n6UiJ2r/view?usp=drivesdk"
-    day_in_text = "в субботу" if "суббот" in day_name.lower() else "в воскресенье"
-    support_msg = (
-        "Твоя поддержка на экзамене: \n"
-        f"Во время пробника {day_in_text} с тобой будет находиться дежурный. "
-        "Если возникнут любые технические сложности или вопросы по организации, сразу пиши в тг:\n"
-        f"📱 {contact} ."
-    )
-    
-    registration_message = (
-        "ПРОБНЫЙ ЭКЗАМЕН\n\n"
-        f"🔗 Дата и время: {date_str} \n"
-        "☺️ Обязательное условие: Во время всего экзамена у тебя должна быть включена камера.\n\n"
-        "Что нужно подготовить:\n"
-        "- Черновик (любые листочки или тетрадь).\n"
-        "- Бланки для ответов (если удалось распечатать).\n"
-        "- Ручка, карандаш и линейка (на всякий случай).\n"
-        "- Тихое и удобное место, где тебя никто не побеспокоит.\n"
-        f"Бланки можно взять тут 👉  {forms_link}\n\n"
-        f"{support_msg}\n\n"
-        f"Подключайся по этой ссылке: {zoom_link}\n\n"
-        "Ты уже знаешь намного больше, желаю показать тебе свой самый лучший результат🔥"
+
+    registration_message = registration_message_text(
+        date_str=date_str,
+        zoom_link=zoom_link,
+        contact=contact,
+        day_name=day_name,
     )
     
     await update.message.reply_text(registration_message)
@@ -237,7 +233,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if user_id in user_data:
         del user_data[user_id]
     
-    await update.message.reply_text("Запись отменена.")
+    await update.message.reply_text(TEXT_CANCELLED)
     return ConversationHandler.END
 
 
