@@ -1,6 +1,9 @@
 # Токен Telegram бота (получить у @BotFather)
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 
+# Прокси для Telegram API (актуально для регионов с ограничениями)
+TELEGRAM_PROXY_URL=http://223.206.58.78:8080
+
 # ID админов (через запятую)
 ADMIN_TELEGRAM_IDS=000000000,111111111
 

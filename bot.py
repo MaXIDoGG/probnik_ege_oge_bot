@@ -336,9 +336,18 @@ def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN не установлен в переменных окружения")
-    
+
+    # Прокси для регионов с ограниченным доступом к Telegram API
+    proxy_url = os.getenv("TELEGRAM_PROXY_URL", "http://223.206.58.78:8080")
+
     # Создаем приложение
-    application = ApplicationBuilder().token(token).build()
+    application = (
+        ApplicationBuilder()
+        .token(token)
+        .proxy(proxy_url)
+        .get_updates_proxy(proxy_url)
+        .build()
+    )
     
     # Создаем ConversationHandler для диалога
     conv_handler = ConversationHandler(

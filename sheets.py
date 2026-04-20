@@ -47,11 +47,11 @@ class GoogleSheets:
             
             # Получаем или создаем лист
             try:
-                self.worksheet = self.spreadsheet.worksheet("Записи2")
+                self.worksheet = self.spreadsheet.worksheet("Записи")
             except gspread.exceptions.WorksheetNotFound:
                 # Создаем новый лист, если его нет
                 self.worksheet = self.spreadsheet.add_worksheet(
-                    title="Записи2",
+                    title="Записи",
                     rows=1000,
                     cols=11
                 )
