@@ -1,6 +1,9 @@
 # Токен Telegram бота (получить у @BotFather)
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 
+# ID админов (через запятую)
+ADMIN_TELEGRAM_IDS=000000000,111111111
+
 # ID Google таблицы (из URL таблицы)
 GOOGLE_SHEET_ID=your_google_sheet_id_here
 

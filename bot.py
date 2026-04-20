@@ -1,15 +1,15 @@
 import logging
 import os
-from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
+    ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
     ContextTypes,
     ConversationHandler,
-    filters
+    filters,
 )
 from dotenv import load_dotenv
 from sheets import GoogleSheets
@@ -21,6 +21,7 @@ from messages import (
     TEXT_CHOOSE_TEACHER,
     TEXT_ENTER_FULL_NAME,
     TEXT_INVALID_FULL_NAME,
+    TEXT_NEW_EXAM_ANNOUNCEMENT,
     TEXT_NO_SLOTS,
     TEXT_SAVE_ERROR,
     TEXT_SCHEDULE_LOAD_ERROR,
@@ -33,8 +34,8 @@ load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
@@ -49,24 +50,111 @@ scheduler = ReminderScheduler()
 user_data = {}
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Начало диалога - выбор типа экзамена"""
-    user_id = update.effective_user.id
-    user_data[user_id] = {}
-    
+def get_exam_type_reply_markup() -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton("ОГЭ", callback_data="exam_oge")],
         [InlineKeyboardButton("ЕГЭ Проф", callback_data="exam_ege_prof")],
-        [InlineKeyboardButton("ЕГЭ База", callback_data="exam_ege_base")]
+        [InlineKeyboardButton("ЕГЭ База", callback_data="exam_ege_base")],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        TEXT_CHOOSE_EXAM_TYPE,
-        reply_markup=reply_markup
-    )
-    
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_register_button_reply_markup() -> InlineKeyboardMarkup:
+    keyboard = [[InlineKeyboardButton("Записаться на экзамен", callback_data="action_register")]]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_admin_ids() -> set[int]:
+    raw = os.getenv("ADMIN_TELEGRAM_IDS", "")
+    admin_ids = set()
+
+    for item in raw.split(","):
+        candidate = item.strip()
+        if not candidate:
+            continue
+        try:
+            admin_ids.add(int(candidate))
+        except ValueError:
+            logger.warning(f"Пропущен некорректный ADMIN_TELEGRAM_IDS: {candidate}")
+
+    return admin_ids
+
+
+async def send_exam_type_choice_message(
+    *,
+    user_id: int,
+    message=None,
+    query=None,
+) -> int:
+    """Общий вход в сценарий записи: выбор типа экзамена"""
+    user_data[user_id] = {}
+    reply_markup = get_exam_type_reply_markup()
+
+    if query is not None:
+        await query.edit_message_text(TEXT_CHOOSE_EXAM_TYPE, reply_markup=reply_markup)
+    elif message is not None:
+        await message.reply_text(TEXT_CHOOSE_EXAM_TYPE, reply_markup=reply_markup)
+    else:
+        raise ValueError("Требуется message или query для отправки шага выбора экзамена")
+
     return EXAM_TYPE
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Начало диалога - выбор типа экзамена"""
+    user_id = update.effective_user.id
+    return await send_exam_type_choice_message(user_id=user_id, message=update.message)
+
+
+async def register_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Запуск записи по inline-кнопке без /start"""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    return await send_exam_type_choice_message(user_id=user_id, query=query)
+
+
+async def announce_new_exam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Админ-команда для массового уведомления о новой записи"""
+    user_id = update.effective_user.id
+    admin_ids = get_admin_ids()
+
+    if user_id not in admin_ids:
+        await update.message.reply_text("У вас нет доступа к этой команде.")
+        return
+
+    try:
+        recipient_ids = sheets.get_unique_telegram_ids()
+    except Exception as e:
+        logger.error(f"Ошибка при получении получателей для рассылки: {e}", exc_info=True)
+        await update.message.reply_text("Не удалось получить список получателей из таблицы.")
+        return
+
+    if not recipient_ids:
+        await update.message.reply_text("В истории записей пока нет получателей для рассылки.")
+        return
+
+    success_count = 0
+    failed_count = 0
+    reply_markup = get_register_button_reply_markup()
+
+    for recipient_id in recipient_ids:
+        try:
+            await context.bot.send_message(
+                chat_id=recipient_id,
+                text=TEXT_NEW_EXAM_ANNOUNCEMENT,
+                reply_markup=reply_markup,
+            )
+            success_count += 1
+        except Exception as e:
+            failed_count += 1
+            logger.warning(f"Не удалось отправить уведомление пользователю {recipient_id}: {e}")
+
+    await update.message.reply_text(
+        "Рассылка завершена.\n"
+        f"Успешно: {success_count}\n"
+        f"С ошибкой: {failed_count}"
+    )
 
 
 async def exam_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -218,12 +306,18 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         contact=contact,
         day_name=day_name,
     )
-    
+
     await update.message.reply_text(registration_message)
-    
+
+    # Показываем кнопку для повторной записи без /start
+    await update.message.reply_text(
+        "Если захочешь записаться снова, нажми кнопку:",
+        reply_markup=get_register_button_reply_markup()
+    )
+
     # Очищаем временные данные
     del user_data[user_id]
-    
+
     return ConversationHandler.END
 
 
@@ -244,11 +338,14 @@ def main():
         raise ValueError("TELEGRAM_BOT_TOKEN не установлен в переменных окружения")
     
     # Создаем приложение
-    application = Application.builder().token(token).build()
+    application = ApplicationBuilder().token(token).build()
     
     # Создаем ConversationHandler для диалога
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CallbackQueryHandler(register_button_callback, pattern="^action_register$"),
+        ],
         states={
             EXAM_TYPE: [CallbackQueryHandler(exam_type_callback, pattern="^exam_")],
             EXAM_SLOT: [CallbackQueryHandler(slot_callback, pattern="^slot_")],
@@ -260,6 +357,7 @@ def main():
     
     # Добавляем обработчики
     application.add_handler(conv_handler)
+    application.add_handler(CommandHandler("announce_new_exam", announce_new_exam))
     
     # Инициализируем Google Sheets
     try:

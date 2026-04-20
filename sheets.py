@@ -47,11 +47,11 @@ class GoogleSheets:
             
             # Получаем или создаем лист
             try:
-                self.worksheet = self.spreadsheet.worksheet("Записи")
+                self.worksheet = self.spreadsheet.worksheet("Записи2")
             except gspread.exceptions.WorksheetNotFound:
                 # Создаем новый лист, если его нет
                 self.worksheet = self.spreadsheet.add_worksheet(
-                    title="Записи",
+                    title="Записи2",
                     rows=1000,
                     cols=11
                 )
@@ -245,6 +245,27 @@ class GoogleSheets:
                 continue
         
         return exams
+
+    def get_unique_telegram_ids(self):
+        """Получение уникальных Telegram ID из истории записей"""
+        if not self.worksheet:
+            raise RuntimeError("Google Sheets не инициализирован")
+
+        records = self.worksheet.get_all_records()
+        unique_ids = set()
+
+        for record in records:
+            telegram_id = str(record.get("Telegram ID", "")).strip()
+            if not telegram_id:
+                continue
+
+            try:
+                unique_ids.add(int(telegram_id))
+            except (ValueError, TypeError):
+                logger.warning(f"Некорректный Telegram ID в истории: {telegram_id}")
+                continue
+
+        return sorted(unique_ids)
     
     def mark_reminder_sent(self, row_number: int, reminder_type: str):
         """Отметить напоминание как отправленное"""
