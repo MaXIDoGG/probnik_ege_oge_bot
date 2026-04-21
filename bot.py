@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -78,6 +79,41 @@ def get_admin_ids() -> set[int]:
             logger.warning(f"Пропущен некорректный ADMIN_TELEGRAM_IDS: {candidate}")
 
     return admin_ids
+
+
+def build_proxy_url() -> str | None:
+    """
+    Возвращает URL прокси:
+    1) TELEGRAM_PROXY_URL, если задан явно;
+    2) иначе собирает из настроек пула.
+    """
+    proxy_scheme = os.getenv("TELEGRAM_PROXY_SCHEME", "socks5").strip() or "socks5"
+    direct_proxy_url = os.getenv("TELEGRAM_PROXY_URL", "").strip()
+    if direct_proxy_url:
+        if "://" not in direct_proxy_url:
+            return f"{proxy_scheme}://{direct_proxy_url}"
+        return direct_proxy_url
+
+    pool_login = os.getenv("TELEGRAM_PROXY_POOL_LOGIN", "").strip()
+    pool_password = os.getenv("TELEGRAM_PROXY_POOL_PASSWORD", "").strip()
+    pool_host = os.getenv("TELEGRAM_PROXY_POOL_HOST", "").strip()
+    port_start_raw = os.getenv("TELEGRAM_PROXY_POOL_PORT_START", "").strip()
+    port_end_raw = os.getenv("TELEGRAM_PROXY_POOL_PORT_END", "").strip()
+
+    if not all([pool_login, pool_password, pool_host, port_start_raw, port_end_raw]):
+        return None
+
+    try:
+        port_start = int(port_start_raw)
+        port_end = int(port_end_raw)
+    except ValueError as exc:
+        raise ValueError("Порты прокси-пула должны быть числами") from exc
+
+    if port_start > port_end:
+        raise ValueError("TELEGRAM_PROXY_POOL_PORT_START не может быть больше PORT_END")
+
+    selected_port = random.randint(port_start, port_end)
+    return f"{proxy_scheme}://{pool_login}:{pool_password}@{pool_host}:{selected_port}"
 
 
 async def send_exam_type_choice_message(
@@ -338,16 +374,17 @@ def main():
         raise ValueError("TELEGRAM_BOT_TOKEN не установлен в переменных окружения")
 
     # Прокси для регионов с ограниченным доступом к Telegram API
-    proxy_url = os.getenv("TELEGRAM_PROXY_URL", "http://223.206.58.78:8080")
+    proxy_url = build_proxy_url()
+    if not proxy_url:
+        logger.warning(
+            "Прокси не задан. Укажите TELEGRAM_PROXY_URL или параметры TELEGRAM_PROXY_POOL_*"
+        )
 
     # Создаем приложение
-    application = (
-        ApplicationBuilder()
-        .token(token)
-        .proxy(proxy_url)
-        .get_updates_proxy(proxy_url)
-        .build()
-    )
+    app_builder = ApplicationBuilder().token(token)
+    if proxy_url:
+        app_builder = app_builder.proxy(proxy_url).get_updates_proxy(proxy_url)
+    application = app_builder.build()
     
     # Создаем ConversationHandler для диалога
     conv_handler = ConversationHandler(
