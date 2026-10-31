@@ -194,6 +194,19 @@ class GoogleSheets:
         
         return slots
     
+    def _schedule_code_map(self) -> dict:
+        """Соответствие 'DD.MM.YYYY HH:MM' -> код доступа из листа 'Даты экзаменов'"""
+        code_map = {}
+        if not self.schedule_worksheet:
+            return code_map
+        for record in self.schedule_worksheet.get_all_records():
+            date_str = str(record.get("Дата", "")).strip()
+            time_str = str(record.get("Время", "")).strip()
+            code = str(record.get("Код доступа", "")).strip()
+            if date_str and time_str and code:
+                code_map[f"{date_str} {time_str}"] = code
+        return code_map
+
     def get_all_exams_for_reminders(self):
         """Получение всех экзаменов для проверки напоминаний"""
         if not self.worksheet:
@@ -203,6 +216,7 @@ class GoogleSheets:
         records = self.worksheet.get_all_records()
         exams = []
         now = datetime.now(pytz.UTC).astimezone(self.timezone)
+        schedule_codes = self._schedule_code_map()
         
         for idx, record in enumerate(records, start=2):  # Начинаем с 2, так как строка 1 - заголовки
             exam_datetime_str = record.get("Дата и время экзамена", "")
@@ -216,6 +230,7 @@ class GoogleSheets:
                 
                 # Проверяем, что экзамен еще не прошел (с небольшим запасом в 15 минут после окончания)
                 if exam_datetime >= now - timedelta(minutes=15):
+                    code = str(record.get("Код доступа", "")).strip() or schedule_codes.get(exam_datetime_str.strip(), "")
                     reminder_1h_sent = record.get("Напоминание за час отправлено", "Нет").strip().lower()
                     reminder_15m_sent = record.get("Напоминание за 15 минут отправлено", "Нет").strip().lower()
                     
@@ -225,7 +240,7 @@ class GoogleSheets:
                         "exam_datetime": exam_datetime,
                         "full_name": record.get("Имя и фамилия", ""),
                         "day_name": record.get("День", ""),  # Суббота или Воскресенье
-                        "code": str(record.get("Код доступа", "")).strip(),
+                        "code": code,
                         "reminder_1h_sent": reminder_1h_sent in ("да", "yes", "1", "true", "✓"),
                         "reminder_15m_sent": reminder_15m_sent in ("да", "yes", "1", "true", "✓")
                     })
@@ -239,6 +254,7 @@ class GoogleSheets:
                         exam_datetime = self.timezone.localize(exam_datetime)
                     
                     if exam_datetime >= now - timedelta(minutes=15):
+                        code = str(record.get("Код доступа", "")).strip() or schedule_codes.get(exam_datetime_str.strip(), "")
                         reminder_1h_sent = record.get("Напоминание за час отправлено", "Нет").strip().lower()
                         reminder_15m_sent = record.get("Напоминание за 15 минут отправлено", "Нет").strip().lower()
                         
@@ -248,7 +264,7 @@ class GoogleSheets:
                             "exam_datetime": exam_datetime,
                             "full_name": record.get("Имя и фамилия", ""),
                             "day_name": record.get("День", ""),
-                            "code": str(record.get("Код доступа", "")).strip(),
+                            "code": code,
                             "reminder_1h_sent": reminder_1h_sent in ("да", "yes", "1", "true", "✓"),
                             "reminder_15m_sent": reminder_15m_sent in ("да", "yes", "1", "true", "✓")
                         })
