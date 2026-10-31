@@ -263,6 +263,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     user_data[user_id]["exam_datetime"] = slot["datetime_str"]
     user_data[user_id]["zoom"] = slot["zoom"]
     user_data[user_id]["contact"] = slot["contact"]
+    user_data[user_id]["code"] = slot.get("code", "")
     
     keyboard = [
         [InlineKeyboardButton("Анастасия", callback_data="teacher_anastasia")],
@@ -341,6 +342,7 @@ async def name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         zoom_link=zoom_link,
         contact=contact,
         day_name=day_name,
+        code=user_data[user_id].get("code", ""),
     )
 
     await update.message.reply_text(registration_message)

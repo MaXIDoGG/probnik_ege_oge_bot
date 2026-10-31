@@ -67,10 +67,20 @@ class GoogleSheets:
                     "Дата и время экзамена",
                     "Преподаватель",
                     "Напоминание за час отправлено",
-                    "Напоминание за 15 минут отправлено"
+                    "Напоминание за 15 минут отправлено",
+                    "Код доступа"
                 ]
                 self.worksheet.append_row(headers)
-            
+
+            # Для существующего листа проверяем наличие колонки "Код доступа"
+            try:
+                existing_headers = self.worksheet.row_values(1)
+                if "Код доступа" not in existing_headers:
+                    self.worksheet.update_cell(1, len(existing_headers) + 1, "Код доступа")
+                    logger.info("Добавлена колонка 'Код доступа' в лист 'Записи'")
+            except Exception as e:
+                logger.warning(f"Не удалось проверить/добавить колонку 'Код доступа': {e}")
+
             # Получаем или создаём лист "Даты экзаменов" с расписанием
             try:
                 self.schedule_worksheet = self.spreadsheet.worksheet("Даты экзаменов")
@@ -119,7 +129,8 @@ class GoogleSheets:
             user_data.get("exam_datetime", ""),  # Формат: DD.MM.YYYY HH:MM
             user_data.get("teacher", ""),
             "Нет",  # Напоминание за час отправлено
-            "Нет"   # Напоминание за 15 минут отправлено
+            "Нет",  # Напоминание за 15 минут отправлено
+            user_data.get("code", "")  # Код доступа
         ]
         
         # Добавляем строку в таблицу
@@ -147,6 +158,7 @@ class GoogleSheets:
             time_str = str(record.get("Время", "")).strip()
             zoom = str(record.get("Zoom", "")).strip()
             contact = str(record.get("Контакт", "")).strip()
+            code = str(record.get("Код доступа", "")).strip()
             
             if not date_str or not time_str:
                 continue
@@ -172,6 +184,7 @@ class GoogleSheets:
                     "exam_datetime": exam_datetime,
                     "zoom": zoom or "https://us06web.zoom.us/j/9709286191",
                     "contact": contact or "@vasilina45",
+                    "code": code,
                     "day_name": day_name,
                     "display": display_date
                 })
@@ -212,6 +225,7 @@ class GoogleSheets:
                         "exam_datetime": exam_datetime,
                         "full_name": record.get("Имя и фамилия", ""),
                         "day_name": record.get("День", ""),  # Суббота или Воскресенье
+                        "code": str(record.get("Код доступа", "")).strip(),
                         "reminder_1h_sent": reminder_1h_sent in ("да", "yes", "1", "true", "✓"),
                         "reminder_15m_sent": reminder_15m_sent in ("да", "yes", "1", "true", "✓")
                     })
@@ -234,6 +248,7 @@ class GoogleSheets:
                             "exam_datetime": exam_datetime,
                             "full_name": record.get("Имя и фамилия", ""),
                             "day_name": record.get("День", ""),
+                            "code": str(record.get("Код доступа", "")).strip(),
                             "reminder_1h_sent": reminder_1h_sent in ("да", "yes", "1", "true", "✓"),
                             "reminder_15m_sent": reminder_15m_sent in ("да", "yes", "1", "true", "✓")
                         })

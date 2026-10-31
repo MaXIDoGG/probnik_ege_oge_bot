@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta
 import pytz
 
-from messages import TEXT_REMINDER_15M, reminder_1h_text, zoom_link_for_day_name
+from messages import reminder_1h_text, reminder_15m_text, zoom_link_for_day_name
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +56,9 @@ class ReminderScheduler:
                 
                 # Проверяем напоминание за час
                 day_name = exam.get("day_name", "").strip()
+                code = exam.get("code", "")
                 zoom_link = zoom_link_for_day_name(day_name)
-                msg_1h = reminder_1h_text(zoom_link)
+                msg_1h = reminder_1h_text(zoom_link, code)
                 
                 reminder_1h_time = exam_datetime - timedelta(hours=1)
                 if not exam["reminder_1h_sent"]:
@@ -78,6 +79,7 @@ class ReminderScheduler:
                 
                 # Проверяем напоминание за 15 минут
                 reminder_15m_time = exam_datetime - timedelta(minutes=15)
+                msg_15m = reminder_15m_text(code)
                 if not exam["reminder_15m_sent"]:
                     # Проверяем, нужно ли отправить сейчас (с допуском в 1 минуту)
                     time_diff = (reminder_15m_time - now).total_seconds()
@@ -85,7 +87,7 @@ class ReminderScheduler:
                         try:
                             await bot.send_message(
                                 chat_id=telegram_id,
-                                text=TEXT_REMINDER_15M
+                                text=msg_15m
                             )
                             # Отмечаем как отправленное в таблице
                             self.sheets.mark_reminder_sent(exam["row_number"], "15m")

@@ -45,15 +45,23 @@ def zoom_link_for_day_name(day_name: str) -> str:
 
 # --- Напоминания ---
 
-def reminder_1h_text(zoom_link: str) -> str:
+def reminder_1h_text(zoom_link: str, code: str = "") -> str:
+    code_line = f"Код доступа: {code}\n" if code else ""
     return (
         "У тебя экзамен через час, ещё раз держи ссылку, на всякий случай "
         f"{zoom_link}\n"
+        f"{code_line}"
         "Удачи🍀"
     )
 
 
 TEXT_REMINDER_15M = "Экзамен через 15 минут, подготовь всё что нужно и заходи🌚"
+
+
+def reminder_15m_text(code: str = "") -> str:
+    if not code:
+        return TEXT_REMINDER_15M
+    return f"{TEXT_REMINDER_15M}\nКод доступа: {code}"
 
 
 # --- Сообщение после регистрации ---
@@ -75,7 +83,9 @@ def registration_message_text(
     zoom_link: str,
     contact: str,
     day_name: str,
+    code: str = "",
 ) -> str:
+    code_line = f"🔑 Код доступа: {code}\n" if code else ""
     return (
         "ПРОБНЫЙ ЭКЗАМЕН\n\n"
         f"🔗 Дата и время: {date_str} \n"
@@ -87,7 +97,8 @@ def registration_message_text(
         "- Тихое и удобное место, где тебя никто не побеспокоит.\n"
         f"Бланки можно взять тут 👉  {FORMS_LINK}\n\n"
         f"{support_text(day_name, contact)}\n\n"
-        f"Подключайся по этой ссылке: {zoom_link}\n\n"
+        f"Подключайся по этой ссылке: {zoom_link}\n"
+        f"{code_line}\n"
         "Ты уже знаешь намного больше, желаю показать тебе свой самый лучший результат🔥"
     )
 
